@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>BLOCK OPS 4D FINAL - MULTIPLAYER</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script type="importmap">
+{
+ "imports": {
+  "three":"https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/",
+  "cannon":"https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/+esm",
+  "peerjs":"https://cdn.jsdelivr.net/npm/peerjs@1.5.2/+esm"
+ }
+}
+</script>
+<style>
+body{margin:0;overflow:hidden;background:#000;color:#fff;font-family:monospace}
+#hud{position:absolute;top:0;left:0;right:0;padding:10px;background:rgba(0,0,0,0.9);border-bottom:2px solid #0f0;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+#hud input{padding:5px;background:#111;color:#0f0;border:1px solid #0f0}
+button{padding:6px 12px;background:#0f0;color:#000;border:0;font-weight:bold;cursor:pointer}
+#cross{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:24px;pointer-events:none}
+</style>
+</head>
+<body>
+<div id="hud">
+<div>
+  <b>BLOCK OPS 4D FINAL</b><br>
+  Tumhari UNIQUE ID: <span id="myid" style="color:#0f0">Generating...</span> <button onclick="copyId()">COPY</button><br>
+  Ammo: <span id="ammo">30</span> | Players: <span id="pcount">1</span> | Physics: REAL g=9.81
+</div>
+<div>
+  Dost ka ID daalo: <input id="friendid" placeholder="Paste Friend ID"><button onclick="joinFriend()">JOIN & PLAY</button><br>
+  WASD Move | CLICK Shoot/Break | R Reload | Q Build<br>
+  <span style="font-size:11px">Click game to lock mouse - Sab real formulas se chal raha hai</span>
+</div>
+</div>
+<div id="cross">+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import {PointerLockControls} from 'three/addons/controls/PointerLockControls.js';
+import * as CANNON from 'cannon';
+import {Peer} from 'peerjs';
+
+// 1. UNIQUE ID SYSTEM - Har user ka permanent ID
+let myUniqueId = localStorage.getItem('blockops_uid');
+if(!myUniqueId){ myUniqueId = 'BO-'+Math.random().toString(36).substr(2,6).toUpperCase()+'-'+Date.now().toString().slice(-4); localStorage.setItem('blockops_uid', myUniqueId); }
+document.getElementById('myid').innerText = myUniqueId;
+window.copyId = ()=>{ navigator.clipboard.writeText(myUniqueId); alert('ID Copied: '+myUniqueId); }
+
+// 2. MULTIPLAYER - PeerJS (Free, no server needed)
+const peer = new Peer(myUniqueId);
+const connections = {}; const otherPlayers = {};
+peer.on('open', id=>{ console.log('My ID:', id); });
+peer.on('connection', conn=>{
+  conn.on('data', data=> handleData(conn.peer, data));
+  connections[conn.peer]=conn;
+});
+function joinFriend(){
+  const fid=document.getElementById('friendid').value.trim();
+  if(!fid) return alert('ID daalo');
+  const conn=peer.connect(fid);
+  conn.on('open',()=>{ connections[fid]=conn; alert('Connected to '+fid); });
+  conn.on('data', data=> handleData(fid, data));
+}
+window.joinFriend=joinFriend;
+
+function handleData(pid, data){
+  if(!otherPlayers[pid]){
+    const geo=new THREE.BoxGeometry(0.6,1.8,0.6); const mat=new THREE.MeshStandardMaterial({color:0xff0000});
+    otherPlayers[pid]=new THREE.Mesh(geo,mat); scene.add(otherPlayers[pid]);
+  }
+  if(data.pos) otherPlayers[pid].position.set(data.pos.x, data.pos.y, data.pos.z);
+  document.getElementById('pcount').innerText = Object.keys(otherPlayers).length+1;
+}
+function broadcastPos(){
+  const pos={x:camera.position.x, y:camera.position.y, z:camera.position.z};
+  Object.values(connections).forEach(c=>{ if(c.open) c.send({pos}); });
+}
+
+// 3. REAL 4D PHYSICS & GRAPHICS
+const scene=new THREE.Scene(); scene.background=new THREE.Color(0x87CEEB); scene.fog=new THREE.Fog(0x87CEEB, 20, 80);
+const camera=new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000);
+const renderer=new THREE.WebGLRenderer({antialias:true}); renderer.setSize(innerWidth, innerHeight); renderer.shadowMap.enabled=true; renderer.toneMapping=THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const controls=new PointerLockControls(camera, renderer.domElement);
+document.body.addEventListener('click',e=>{ if(e.target.tagName!=='INPUT' && e.target.tagName!=='BUTTON') controls.lock(); });
+
+const world=new CANNON.World({gravity:new CANNON.Vec3(0,-9.81,0)}); // F=ma, g=9.81
+const sun=new THREE.DirectionalLight(0xfff8e1,1.5); sun.position.set(30,40,20); sun.castShadow=true; sun.shadow.mapSize.set(2048,2048); scene.add(sun); scene.add(new THREE.AmbientLight(0xffffff,0.5));
+
+const blocks=[], bodies=[];
+function addBlock(x,y,z,col=0x5a8f3a){
+  const geo=new THREE.BoxGeometry(1,1,1); const mat=new THREE.MeshStandardMaterial({color:col}); const mesh=new THREE.Mesh(geo,mat); mesh.position.set(x,y,z); mesh.castShadow=true; mesh.receiveShadow=true; scene.add(mesh);
+  const shape=new CANNON.Box(new CANNON.Vec3(0.5,0.5,0.5)); const body=new CANNON.Body({mass:(y==-2?0:2), shape}); body.position.set(x,y,z); world.addBody(body); blocks.push(mesh); bodies.push(body);
+}
+for(let x=-25;x<25;x++) for(let z=-25;z<25;z++) addBlock(x,-2,z, 0x6b8e23);
+for(let i=0;i<30;i++) addBlock((Math.random()-0.5)*30, 0, (Math.random()-0.5)*30, 0x888888);
+
+let ammo=30;
+renderer.domElement.addEventListener('mousedown',()=>{
+  if(!controls.isLocked) return;
+  if(ammo<=0) return; ammo--; document.getElementById('ammo').innerText=ammo;
+  const dir=new THREE.Vector3(); camera.getWorldDirection(dir);
+  const ray=new THREE.Raycaster(camera.position, dir);
+  const hits=ray.intersectObjects(blocks);
+  if(hits[0]){ const idx=blocks.indexOf(hits[0].object); if(idx>=0){ bodies[idx].applyImpulse(new CANNON.Vec3(dir.x*15,5,dir.z*15), bodies[idx].position); } }
+});
+
+const keys={}; addEventListener('keydown',e=>{keys[e.key.toLowerCase()]=true; if(e.key.toLowerCase()=='r'){ammo=30; document.getElementById('ammo').innerText=ammo;}}); addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+
+function animate(){
+  requestAnimationFrame(animate);
+  world.step(1/60);
+  for(let i=0;i<blocks.length;i++){ blocks[i].position.copy(bodies[i].position); blocks[i].quaternion.copy(bodies[i].quaternion); }
+  if(controls.isLocked){
+    if(keys['w']) controls.moveForward(0.12);
+    if(keys['s']) controls.moveForward(-0.12);
+    if(keys['a']) controls.moveRight(-0.12);
+    if(keys['d']) controls.moveRight(0.12);
+    broadcastPos();
+  }
+  renderer.render(scene,camera);
+}
+camera.position.set(0,3,8);
+animate();
+</script>
+</body>
+  </html>
